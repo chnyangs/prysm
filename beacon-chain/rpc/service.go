@@ -106,9 +106,9 @@ type Config struct {
 	FinalizationFetcher           blockchain.FinalizationFetcher
 	AttestationReceiver           blockchain.AttestationReceiver
 	BlockReceiver                 blockchain.BlockReceiver
+	ExecutionPayloadReceiver      blockchain.ExecutionPayloadReceiver
 	BlobReceiver                  blockchain.BlobReceiver
 	PayloadAttestationReceiver    blockchain.PayloadAttestationReceiver
-	ExecutionPayloadReceiver      blockchain.ExecutionPayloadReceiver
 	ExecutionChainService         execution.Chain
 	ChainStartFetcher             execution.ChainStartFetcher
 	ExecutionChainInfoFetcher     execution.ChainInfoFetcher

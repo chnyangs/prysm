@@ -40,6 +40,7 @@ type ChainService struct {
 	NotFinalized                        bool
 	Optimistic                          bool
 	ValidAttestation                    bool
+	HasPayload                          bool
 	ValidatorsRoot                      [32]byte
 	PublicKey                           [fieldparams.BLSPubkeyLength]byte
 	FinalizedCheckPoint                 *ethpb.Checkpoint
@@ -77,6 +78,9 @@ type ChainService struct {
 	SyncingRoot                         [32]byte
 	Blobs                               []blocks.VerifiedROBlob
 	TargetRoot                          [32]byte
+	HighestReceivedSlot                 primitives.Slot
+	HighestReceivedRoot                 [32]byte
+	PayloadStatus                       primitives.PTCStatus
 	ReceivePayloadAttestationMessageErr error
 }
 
@@ -570,12 +574,12 @@ func (s *ChainService) ReceivedBlocksLastEpoch() (uint64, error) {
 	return 0, nil
 }
 
-// HighestReceivedBlockSlot mocks the same method in the chain service
-func (s *ChainService) HighestReceivedBlockSlot() primitives.Slot {
+// HighestReceivedBlockSlotRoot mocks the same method in the chain service
+func (s *ChainService) HighestReceivedBlockSlotRoot() (primitives.Slot, [32]byte) {
 	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.HighestReceivedBlockSlot()
+		return s.ForkChoiceStore.HighestReceivedBlockSlotRoot()
 	}
-	return 0
+	return s.HighestReceivedSlot, s.HighestReceivedRoot
 }
 
 // InsertNode mocks the same method in the chain service
@@ -644,4 +648,8 @@ func (c *ChainService) HashInForkchoice([32]byte) bool {
 // ReceivePayloadAttestationMessage mocks the same method in the chain service
 func (c *ChainService) ReceivePayloadAttestationMessage(_ context.Context, _ *ethpb.PayloadAttestationMessage) error {
 	return c.ReceivePayloadAttestationMessageErr
+}
+
+func (c *ChainService) PayloadBeingSynced(root [32]byte) (primitives.PTCStatus, bool) {
+	return c.PayloadStatus, c.HasPayload
 }

@@ -52,15 +52,16 @@ type PayloadAttestationReceiver interface {
 	ReceivePayloadAttestationMessage(ctx context.Context, a *ethpb.PayloadAttestationMessage) error
 }
 
+// ExecutionPayloadReceiver interface defines the methods of chain service for receiving and processing new execution payload envelope.
+type ExecutionPayloadReceiver interface {
+	PayloadBeingSynced(root [32]byte) (primitives.PTCStatus, bool)
+	ReceiveExecutionPayloadEnvelope(ctx context.Context, envelope interfaces.ROExecutionPayloadEnvelope, _ das.AvailabilityStore) error
+}
+
 // BlobReceiver interface defines the methods of chain service for receiving new
 // blobs
 type BlobReceiver interface {
 	ReceiveBlob(context.Context, blocks.VerifiedROBlob) error
-}
-
-// ExecutionPayloadReceiver interface defines the methods of chain service for receiving `ROExecutionPayloadEnvelope`.
-type ExecutionPayloadReceiver interface {
-	ReceiveExecutionPayloadEnvelope(ctx context.Context, envelope interfaces.ROExecutionPayloadEnvelope, _ das.AvailabilityStore) error
 }
 
 // SlashingReceiver interface defines the methods of chain service for receiving validated slashing over the wire.
