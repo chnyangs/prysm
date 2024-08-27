@@ -12,9 +12,9 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
 	payloadattribute "github.com/prysmaticlabs/prysm/v5/consensus-types/payload-attribute"
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing/trace"
 	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/sirupsen/logrus"
-	"go.opencensus.io/trace"
 )
 
 func (s *Service) isNewHead(r [32]byte) bool {
@@ -92,7 +92,7 @@ func (s *Service) forkchoiceUpdateWithExecution(ctx context.Context, args *fcuCo
 	_, span := trace.StartSpan(ctx, "beacon-chain.blockchain.forkchoiceUpdateWithExecution")
 	defer span.End()
 	// Note: Use the service context here to avoid the parent context being ended during a forkchoice update.
-	ctx = trace.NewContext(s.ctx, span)
+	ctx = trace.ContextWithSpan(s.ctx, span)
 	_, err := s.notifyForkchoiceUpdate(ctx, args)
 	if err != nil {
 		return errors.Wrap(err, "could not notify forkchoice update")

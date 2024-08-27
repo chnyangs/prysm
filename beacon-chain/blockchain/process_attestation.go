@@ -10,7 +10,7 @@ import (
 	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
 	"github.com/prysmaticlabs/prysm/v5/time/slots"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
 )
 
 // OnAttestation is called whenever an attestation is received, verifies the attestation is valid and saves

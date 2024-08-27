@@ -9,8 +9,8 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
 	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing"
+	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing/trace"
 	"github.com/sirupsen/logrus"
-	"go.opencensus.io/trace"
 )
 
 // Returns true if builder (ie outsourcing block construction) can be used. Both conditions have to meet:

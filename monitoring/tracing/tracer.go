@@ -3,53 +3,66 @@
 package tracing
 
 import (
+	"context"
 	"errors"
+	"time"
 
-	"contrib.go.opencensus.io/exporter/jaeger"
-	prysmTrace "github.com/prysmaticlabs/prysm/v5/monitoring/tracing/trace"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 	"github.com/sirupsen/logrus"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
 
 var log = logrus.WithField("prefix", "tracing")
 
-// Setup creates and initializes a new tracing configuration..
+// Setup creates and initializes a new tracing configuration using OpenTelemetry.
 func Setup(serviceName, processName, endpoint string, sampleFraction float64, enable bool) error {
 	if !enable {
-		trace.ApplyConfig(trace.Config{DefaultSampler: trace.NeverSample()})
+		// If tracing is disabled, return immediately
 		return nil
 	}
-	prysmTrace.TracingEnabled = true
 
 	if serviceName == "" {
 		return errors.New("tracing service name cannot be empty")
 	}
 
-	trace.ApplyConfig(trace.Config{
-		DefaultSampler:          trace.ProbabilitySampler(sampleFraction),
-		MaxMessageEventsPerSpan: 500,
-	})
-
 	log.Infof("Starting Jaeger exporter endpoint at address = %s", endpoint)
-	exporter, err := jaeger.NewExporter(jaeger.Options{
-		CollectorEndpoint: endpoint,
-		Process: jaeger.Process{
-			ServiceName: serviceName,
-			Tags: []jaeger.Tag{
-				jaeger.StringTag("process_name", processName),
-				jaeger.StringTag("version", version.Version()),
-			},
-		},
-		BufferMaxCount: 10000,
-		OnError: func(err error) {
-			log.WithError(err).Error("Could not process span")
-		},
-	})
+	exporter, err := otlptrace.New(
+		context.Background(),
+		otlptracehttp.NewClient(
+			otlptracehttp.WithEndpoint(endpoint),
+			otlptracehttp.WithHeaders(map[string]string{
+				"content-type": "application/json",
+			}),
+			otlptracehttp.WithInsecure(), //Remove this for public env
+		),
+	)
 	if err != nil {
 		return err
 	}
-	trace.RegisterExporter(exporter)
 
+	tp := trace.NewTracerProvider(
+		trace.WithSampler(trace.TraceIDRatioBased(sampleFraction)),
+		trace.WithBatcher(
+			exporter,
+			trace.WithMaxExportBatchSize(trace.DefaultMaxExportBatchSize),
+			trace.WithBatchTimeout(trace.DefaultScheduleDelay*time.Millisecond),
+			trace.WithMaxExportBatchSize(trace.DefaultMaxExportBatchSize),
+		),
+		trace.WithResource(
+			resource.NewWithAttributes(
+				semconv.SchemaURL,
+				semconv.ServiceNameKey.String(serviceName),
+				attribute.String("process_name", processName),
+			),
+		),
+	)
+
+	otel.SetTracerProvider(tp)
+	log.Printf("Tracing enabled with endpoint: %s", endpoint)
 	return nil
 }

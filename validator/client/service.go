@@ -32,7 +32,7 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
 	"github.com/prysmaticlabs/prysm/v5/validator/keymanager/local"
 	remoteweb3signer "github.com/prysmaticlabs/prysm/v5/validator/keymanager/remote-web3signer"
-	"go.opencensus.io/plugin/ocgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -308,7 +308,7 @@ func ConstructDialOptions(
 			grpcretry.WithMax(grpcRetries),
 			grpcretry.WithBackoff(grpcretry.BackoffLinear(grpcRetryDelay)),
 		),
-		grpc.WithStatsHandler(&ocgrpc.ClientHandler{}),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithUnaryInterceptor(middleware.ChainUnaryClient(
 			grpcopentracing.UnaryClientInterceptor(),
 			grpcprometheus.UnaryClientInterceptor,

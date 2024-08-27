@@ -9,7 +9,8 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/sirupsen/logrus"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const noMsgData = "message contains no data"
@@ -24,11 +25,8 @@ func SafelyHandleMessage(ctx context.Context, fn func(ctx context.Context, messa
 	// Fingers crossed that it doesn't panic...
 	if err := fn(ctx, msg); err != nil {
 		// Report any error on the span, if one exists.
-		if span := trace.FromContext(ctx); span != nil {
-			span.SetStatus(trace.Status{
-				Code:    trace.StatusCodeInternal,
-				Message: err.Error(),
-			})
+		if span := trace.SpanFromContext(ctx); span != nil {
+			span.SetStatus(codes.Error, err.Error())
 		}
 	}
 }
@@ -51,11 +49,8 @@ func HandlePanic(ctx context.Context, msg *pubsub.Message) {
 		if ctx == nil {
 			return
 		}
-		if span := trace.FromContext(ctx); span != nil {
-			span.SetStatus(trace.Status{
-				Code:    trace.StatusCodeInternal,
-				Message: fmt.Sprintf("Panic: %v", r),
-			})
+		if span := trace.SpanFromContext(ctx); span != nil {
+			span.SetStatus(codes.Error, fmt.Sprintf("Panic: %v", r))
 		}
 	}
 }
