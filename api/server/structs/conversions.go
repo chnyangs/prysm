@@ -15,7 +15,10 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
 	"github.com/prysmaticlabs/prysm/v5/math"
 	enginev1 "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
+	ethv1 "github.com/prysmaticlabs/prysm/v5/proto/eth/v1"
+	ethv2 "github.com/prysmaticlabs/prysm/v5/proto/eth/v2"
 	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 )
 
 var errNilValue = errors.New("nil value")
@@ -1507,4 +1510,89 @@ func PendingConsolidationsFromConsensus(cs []*eth.PendingConsolidation) []*Pendi
 		}
 	}
 	return consolidations
+}
+
+func HeadEventFromV1(event *ethv1.EventHead) *HeadEvent {
+	return &HeadEvent{
+		Slot:                      fmt.Sprintf("%d", event.Slot),
+		Block:                     hexutil.Encode(event.Block),
+		State:                     hexutil.Encode(event.State),
+		EpochTransition:           event.EpochTransition,
+		ExecutionOptimistic:       event.ExecutionOptimistic,
+		PreviousDutyDependentRoot: hexutil.Encode(event.PreviousDutyDependentRoot),
+		CurrentDutyDependentRoot:  hexutil.Encode(event.CurrentDutyDependentRoot),
+	}
+}
+
+func FinalizedCheckpointEventFromV1(event *ethv1.EventFinalizedCheckpoint) *FinalizedCheckpointEvent {
+	return &FinalizedCheckpointEvent{
+		Block:               hexutil.Encode(event.Block),
+		State:               hexutil.Encode(event.State),
+		Epoch:               fmt.Sprintf("%d", event.Epoch),
+		ExecutionOptimistic: event.ExecutionOptimistic,
+	}
+}
+
+func LightClientFinalityUpdateEventFromV2(event *ethv2.LightClientFinalityUpdateWithVersion) *LightClientFinalityUpdateEvent {
+	var finalityBranch []string
+	for _, b := range event.Data.FinalityBranch {
+		finalityBranch = append(finalityBranch, hexutil.Encode(b))
+	}
+	return &LightClientFinalityUpdateEvent{
+		Version: version.String(int(event.Version)),
+		Data: &LightClientFinalityUpdate{
+			AttestedHeader: &BeaconBlockHeader{
+				Slot:          fmt.Sprintf("%d", event.Data.AttestedHeader.Slot),
+				ProposerIndex: fmt.Sprintf("%d", event.Data.AttestedHeader.ProposerIndex),
+				ParentRoot:    hexutil.Encode(event.Data.AttestedHeader.ParentRoot),
+				StateRoot:     hexutil.Encode(event.Data.AttestedHeader.StateRoot),
+				BodyRoot:      hexutil.Encode(event.Data.AttestedHeader.BodyRoot),
+			},
+			FinalizedHeader: &BeaconBlockHeader{
+				Slot:          fmt.Sprintf("%d", event.Data.FinalizedHeader.Slot),
+				ProposerIndex: fmt.Sprintf("%d", event.Data.FinalizedHeader.ProposerIndex),
+				ParentRoot:    hexutil.Encode(event.Data.FinalizedHeader.ParentRoot),
+				StateRoot:     hexutil.Encode(event.Data.FinalizedHeader.StateRoot),
+			},
+			FinalityBranch: finalityBranch,
+			SyncAggregate: &SyncAggregate{
+				SyncCommitteeBits:      hexutil.Encode(event.Data.SyncAggregate.SyncCommitteeBits),
+				SyncCommitteeSignature: hexutil.Encode(event.Data.SyncAggregate.SyncCommitteeSignature),
+			},
+			SignatureSlot: fmt.Sprintf("%d", event.Data.SignatureSlot),
+		},
+	}
+}
+
+func LightClientOptimisticUpdateWithVersionFromV2(event *ethv2.LightClientOptimisticUpdateWithVersion) *LightClientOptimisticUpdateEvent {
+	return &LightClientOptimisticUpdateEvent{
+		Version: version.String(int(event.Version)),
+		Data: &LightClientOptimisticUpdate{
+			AttestedHeader: &BeaconBlockHeader{
+				Slot:          fmt.Sprintf("%d", event.Data.AttestedHeader.Slot),
+				ProposerIndex: fmt.Sprintf("%d", event.Data.AttestedHeader.ProposerIndex),
+				ParentRoot:    hexutil.Encode(event.Data.AttestedHeader.ParentRoot),
+				StateRoot:     hexutil.Encode(event.Data.AttestedHeader.StateRoot),
+				BodyRoot:      hexutil.Encode(event.Data.AttestedHeader.BodyRoot),
+			},
+			SyncAggregate: &SyncAggregate{
+				SyncCommitteeBits:      hexutil.Encode(event.Data.SyncAggregate.SyncCommitteeBits),
+				SyncCommitteeSignature: hexutil.Encode(event.Data.SyncAggregate.SyncCommitteeSignature),
+			},
+			SignatureSlot: fmt.Sprintf("%d", event.Data.SignatureSlot),
+		},
+	}
+}
+
+func EventChainReorgFromV1(event *ethv1.EventChainReorg) *ChainReorgEvent {
+	return &ChainReorgEvent{
+		Slot:                fmt.Sprintf("%d", event.Slot),
+		Depth:               fmt.Sprintf("%d", event.Depth),
+		OldHeadBlock:        hexutil.Encode(event.OldHeadBlock),
+		NewHeadBlock:        hexutil.Encode(event.NewHeadBlock),
+		OldHeadState:        hexutil.Encode(event.OldHeadState),
+		NewHeadState:        hexutil.Encode(event.NewHeadState),
+		Epoch:               fmt.Sprintf("%d", event.Epoch),
+		ExecutionOptimistic: event.ExecutionOptimistic,
+	}
 }

@@ -26,15 +26,25 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/testing/assert"
 	"github.com/prysmaticlabs/prysm/v5/testing/require"
 	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	sse "github.com/r3labs/sse/v2"
 )
 
 type flushableResponseRecorder struct {
 	*httptest.ResponseRecorder
-	flushed bool
+	flushed   bool
+	flushBuff chan bool
 }
 
 func (f *flushableResponseRecorder) Flush() {
 	f.flushed = true
+	f.flushBuff <- true
+}
+
+func NewFlushabaleResponseRecorder() *flushableResponseRecorder {
+	return &flushableResponseRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		flushBuff:        make(chan bool, chanBuffer),
+	}
 }
 
 func TestStreamEvents_OperationsEvents(t *testing.T) {
@@ -57,151 +67,198 @@ func TestStreamEvents_OperationsEvents(t *testing.T) {
 			topics[i] = "topics=" + topic
 		}
 		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://example.com/eth/v1/events?%s", strings.Join(topics, "&")), nil)
-		w := &flushableResponseRecorder{
-			ResponseRecorder: httptest.NewRecorder(),
-		}
+		w := NewFlushabaleResponseRecorder()
 
 		go func() {
 			s.StreamEvents(w, request)
 		}()
-		// wait for initiation of StreamEvents
-		time.Sleep(100 * time.Millisecond)
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.UnaggregatedAttReceived,
-			Data: &operation.UnAggregatedAttReceivedData{
-				Attestation: util.HydrateAttestation(&eth.Attestation{}),
-			},
-		})
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.AggregatedAttReceived,
-			Data: &operation.AggregatedAttReceivedData{
-				Attestation: &eth.AggregateAttestationAndProof{
-					AggregatorIndex: 0,
-					Aggregate:       util.HydrateAttestation(&eth.Attestation{}),
-					SelectionProof:  make([]byte, 96),
-				},
-			},
-		})
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.ExitReceived,
-			Data: &operation.ExitReceivedData{
-				Exit: &eth.SignedVoluntaryExit{
-					Exit: &eth.VoluntaryExit{
-						Epoch:          0,
-						ValidatorIndex: 0,
-					},
-					Signature: make([]byte, 96),
-				},
-			},
-		})
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.SyncCommitteeContributionReceived,
-			Data: &operation.SyncCommitteeContributionReceivedData{
-				Contribution: &eth.SignedContributionAndProof{
-					Message: &eth.ContributionAndProof{
-						AggregatorIndex: 0,
-						Contribution: &eth.SyncCommitteeContribution{
-							Slot:              0,
-							BlockRoot:         make([]byte, 32),
-							SubcommitteeIndex: 0,
-							AggregationBits:   make([]byte, 16),
-							Signature:         make([]byte, 96),
-						},
-						SelectionProof: make([]byte, 96),
-					},
-					Signature: make([]byte, 96),
-				},
-			},
-		})
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.BLSToExecutionChangeReceived,
-			Data: &operation.BLSToExecutionChangeReceivedData{
-				Change: &eth.SignedBLSToExecutionChange{
-					Message: &eth.BLSToExecutionChange{
-						ValidatorIndex:     0,
-						FromBlsPubkey:      make([]byte, 48),
-						ToExecutionAddress: make([]byte, 20),
-					},
-					Signature: make([]byte, 96),
-				},
-			},
-		})
+
 		ro, err := blocks.NewROBlob(util.HydrateBlobSidecar(&eth.BlobSidecar{}))
 		require.NoError(t, err)
 		vblob := blocks.NewVerifiedROBlob(ro)
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.BlobSidecarReceived,
-			Data: &operation.BlobSidecarReceivedData{
-				Blob: &vblob,
-			},
-		})
 
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.AttesterSlashingReceived,
-			Data: &operation.AttesterSlashingReceivedData{
-				AttesterSlashing: &eth.AttesterSlashing{
-					Attestation_1: &eth.IndexedAttestation{
-						AttestingIndices: []uint64{0, 1},
-						Data: &eth.AttestationData{
-							BeaconBlockRoot: make([]byte, fieldparams.RootLength),
-							Source: &eth.Checkpoint{
-								Root: make([]byte, fieldparams.RootLength),
-							},
-							Target: &eth.Checkpoint{
-								Root: make([]byte, fieldparams.RootLength),
-							},
-						},
-						Signature: make([]byte, fieldparams.BLSSignatureLength),
-					},
-					Attestation_2: &eth.IndexedAttestation{
-						AttestingIndices: []uint64{0, 1},
-						Data: &eth.AttestationData{
-							BeaconBlockRoot: make([]byte, fieldparams.RootLength),
-							Source: &eth.Checkpoint{
-								Root: make([]byte, fieldparams.RootLength),
-							},
-							Target: &eth.Checkpoint{
-								Root: make([]byte, fieldparams.RootLength),
-							},
-						},
-						Signature: make([]byte, fieldparams.BLSSignatureLength),
+		events := []*feed.Event{
+			&feed.Event{
+				Type: operation.UnaggregatedAttReceived,
+				Data: &operation.UnAggregatedAttReceivedData{
+					Attestation: util.HydrateAttestation(&eth.Attestation{}),
+				},
+			},
+			&feed.Event{
+				Type: operation.AggregatedAttReceived,
+				Data: &operation.AggregatedAttReceivedData{
+					Attestation: &eth.AggregateAttestationAndProof{
+						AggregatorIndex: 0,
+						Aggregate:       util.HydrateAttestation(&eth.Attestation{}),
+						SelectionProof:  make([]byte, 96),
 					},
 				},
 			},
-		})
-
-		s.OperationNotifier.OperationFeed().Send(&feed.Event{
-			Type: operation.ProposerSlashingReceived,
-			Data: &operation.ProposerSlashingReceivedData{
-				ProposerSlashing: &eth.ProposerSlashing{
-					Header_1: &eth.SignedBeaconBlockHeader{
-						Header: &eth.BeaconBlockHeader{
-							ParentRoot: make([]byte, fieldparams.RootLength),
-							StateRoot:  make([]byte, fieldparams.RootLength),
-							BodyRoot:   make([]byte, fieldparams.RootLength),
+			&feed.Event{
+				Type: operation.ExitReceived,
+				Data: &operation.ExitReceivedData{
+					Exit: &eth.SignedVoluntaryExit{
+						Exit: &eth.VoluntaryExit{
+							Epoch:          0,
+							ValidatorIndex: 0,
 						},
-						Signature: make([]byte, fieldparams.BLSSignatureLength),
-					},
-					Header_2: &eth.SignedBeaconBlockHeader{
-						Header: &eth.BeaconBlockHeader{
-							ParentRoot: make([]byte, fieldparams.RootLength),
-							StateRoot:  make([]byte, fieldparams.RootLength),
-							BodyRoot:   make([]byte, fieldparams.RootLength),
-						},
-						Signature: make([]byte, fieldparams.BLSSignatureLength),
+						Signature: make([]byte, 96),
 					},
 				},
 			},
-		})
+			&feed.Event{
+				Type: operation.SyncCommitteeContributionReceived,
+				Data: &operation.SyncCommitteeContributionReceivedData{
+					Contribution: &eth.SignedContributionAndProof{
+						Message: &eth.ContributionAndProof{
+							AggregatorIndex: 0,
+							Contribution: &eth.SyncCommitteeContribution{
+								Slot:              0,
+								BlockRoot:         make([]byte, 32),
+								SubcommitteeIndex: 0,
+								AggregationBits:   make([]byte, 16),
+								Signature:         make([]byte, 96),
+							},
+							SelectionProof: make([]byte, 96),
+						},
+						Signature: make([]byte, 96),
+					},
+				},
+			},
+			&feed.Event{
+				Type: operation.BLSToExecutionChangeReceived,
+				Data: &operation.BLSToExecutionChangeReceivedData{
+					Change: &eth.SignedBLSToExecutionChange{
+						Message: &eth.BLSToExecutionChange{
+							ValidatorIndex:     0,
+							FromBlsPubkey:      make([]byte, 48),
+							ToExecutionAddress: make([]byte, 20),
+						},
+						Signature: make([]byte, 96),
+					},
+				},
+			},
+			&feed.Event{
+				Type: operation.BlobSidecarReceived,
+				Data: &operation.BlobSidecarReceivedData{
+					Blob: &vblob,
+				},
+			},
+			&feed.Event{
+				Type: operation.AttesterSlashingReceived,
+				Data: &operation.AttesterSlashingReceivedData{
+					AttesterSlashing: &eth.AttesterSlashing{
+						Attestation_1: &eth.IndexedAttestation{
+							AttestingIndices: []uint64{0, 1},
+							Data: &eth.AttestationData{
+								BeaconBlockRoot: make([]byte, fieldparams.RootLength),
+								Source: &eth.Checkpoint{
+									Root: make([]byte, fieldparams.RootLength),
+								},
+								Target: &eth.Checkpoint{
+									Root: make([]byte, fieldparams.RootLength),
+								},
+							},
+							Signature: make([]byte, fieldparams.BLSSignatureLength),
+						},
+						Attestation_2: &eth.IndexedAttestation{
+							AttestingIndices: []uint64{0, 1},
+							Data: &eth.AttestationData{
+								BeaconBlockRoot: make([]byte, fieldparams.RootLength),
+								Source: &eth.Checkpoint{
+									Root: make([]byte, fieldparams.RootLength),
+								},
+								Target: &eth.Checkpoint{
+									Root: make([]byte, fieldparams.RootLength),
+								},
+							},
+							Signature: make([]byte, fieldparams.BLSSignatureLength),
+						},
+					},
+				},
+			},
+			&feed.Event{
+				Type: operation.ProposerSlashingReceived,
+				Data: &operation.ProposerSlashingReceivedData{
+					ProposerSlashing: &eth.ProposerSlashing{
+						Header_1: &eth.SignedBeaconBlockHeader{
+							Header: &eth.BeaconBlockHeader{
+								ParentRoot: make([]byte, fieldparams.RootLength),
+								StateRoot:  make([]byte, fieldparams.RootLength),
+								BodyRoot:   make([]byte, fieldparams.RootLength),
+							},
+							Signature: make([]byte, fieldparams.BLSSignatureLength),
+						},
+						Header_2: &eth.SignedBeaconBlockHeader{
+							Header: &eth.BeaconBlockHeader{
+								ParentRoot: make([]byte, fieldparams.RootLength),
+								StateRoot:  make([]byte, fieldparams.RootLength),
+								BodyRoot:   make([]byte, fieldparams.RootLength),
+							},
+							Signature: make([]byte, fieldparams.BLSSignatureLength),
+						},
+					},
+				},
+			},
+		}
 
-		time.Sleep(1 * time.Second)
-		request.Context().Done()
+		expected := make(map[string]bool)
+		for i := range events {
+			ev := events[i]
+			// serialize the event the same way the server will so that we can compare expectation to results.
+			top := topicForEvent(ev)
+			eb, err := lazyReaderForEvent(top, ev)
+			require.NoError(t, err)
+			exb, err := io.ReadAll(eb())
+			require.NoError(t, err)
+			exs := string(exb[0 : len(exb)-2]) // remove trailing double newline
 
-		resp := w.Result()
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.NotNil(t, body)
-		assert.Equal(t, operationsResult, string(body))
+			// Send the event on the feed.
+			s.OperationNotifier.OperationFeed().Send(ev)
+			expected[exs] = true
+		}
+
+		// maxBufferSize param copied from sse lib client code
+		sseR := sse.NewEventStreamReader(w.Body, 1<<16)
+		testTimeout := time.NewTimer(500 * time.Millisecond)
+		for {
+			select {
+			case <-testTimeout.C:
+				t.Fatal("timed out waiting for events")
+			// The event streamer will flush the writer at the end of each batch, so this is a good signal
+			// to wait for data to be ready to read.
+			case <-w.flushBuff:
+				for {
+					// Things can get a little racy between the test request write buffer and the sse stream reader.
+					// Under the hood the httptest ResponseRecorder body is a bytes.Buffer, which will return EOF when
+					// the end is reached. sse reader uses a bufio.Scanner, which has a sticky internal error cache. So when
+					// .Scan hits this EOF, it gives up the ghost. When we hit this condition we can reset the stream reader
+					// and wait for a flush, at which point it should start working again.
+					// TODO: write a http.ResponseWriter implementation that wraps httptest.ResponseRecorder. The Header and
+					// WriterHeader methods would simply delegate, but the Write method would copy all incoming bytes to an io.Pipe
+					// first, and then call the Write method of the underlying ResponseRecorder. This would allow us to read from the
+					// io.Pipe in the test, and not have to worry about the EOF issue. Otherwise this test will be racy.
+					ev, err := sseR.ReadEvent()
+					if err == io.EOF {
+						// reset the stream reader because it hit the end of the bufio reader.
+						sseR = sse.NewEventStreamReader(w.Body, 1<<16)
+						break
+					} else {
+						require.NoError(t, err)
+					}
+					str := string(ev)
+					delete(expected, str)
+				}
+			}
+			if len(expected) == 0 {
+				break
+			}
+		}
+		// Clean up the timeout timer.
+		if !testTimeout.Stop() {
+			<-testTimeout.C
+		}
+		require.Equal(t, 0, len(expected), "expected events not seen")
 	})
 	t.Run("state", func(t *testing.T) {
 		s := &Server{
@@ -403,34 +460,6 @@ func TestStreamEvents_OperationsEvents(t *testing.T) {
 		}
 	})
 }
-
-const operationsResult = `:
-
-event: attestation
-data: {"aggregation_bits":"0x00","data":{"slot":"0","index":"0","beacon_block_root":"0x0000000000000000000000000000000000000000000000000000000000000000","source":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"},"target":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"}},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}
-
-event: attestation
-data: {"aggregation_bits":"0x00","data":{"slot":"0","index":"0","beacon_block_root":"0x0000000000000000000000000000000000000000000000000000000000000000","source":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"},"target":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"}},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}
-
-event: voluntary_exit
-data: {"message":{"epoch":"0","validator_index":"0"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}
-
-event: contribution_and_proof
-data: {"message":{"aggregator_index":"0","contribution":{"slot":"0","beacon_block_root":"0x0000000000000000000000000000000000000000000000000000000000000000","subcommittee_index":"0","aggregation_bits":"0x00000000000000000000000000000000","signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"selection_proof":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}
-
-event: bls_to_execution_change
-data: {"message":{"validator_index":"0","from_bls_pubkey":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","to_execution_address":"0x0000000000000000000000000000000000000000"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}
-
-event: blob_sidecar
-data: {"block_root":"0xc78009fdf07fc56a11f122370658a353aaa542ed63e44c4bc15ff4cd105ab33c","index":"0","slot":"0","kzg_commitment":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","versioned_hash":"0x01b0761f87b081d5cf10757ccc89f12be355c70e2e29df288b65b30710dcbcd1"}
-
-event: attester_slashing
-data: {"attestation_1":{"attesting_indices":["0","1"],"data":{"slot":"0","index":"0","beacon_block_root":"0x0000000000000000000000000000000000000000000000000000000000000000","source":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"},"target":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"}},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"attestation_2":{"attesting_indices":["0","1"],"data":{"slot":"0","index":"0","beacon_block_root":"0x0000000000000000000000000000000000000000000000000000000000000000","source":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"},"target":{"epoch":"0","root":"0x0000000000000000000000000000000000000000000000000000000000000000"}},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}}
-
-event: proposer_slashing
-data: {"signed_header_1":{"message":{"slot":"0","proposer_index":"0","parent_root":"0x0000000000000000000000000000000000000000000000000000000000000000","state_root":"0x0000000000000000000000000000000000000000000000000000000000000000","body_root":"0x0000000000000000000000000000000000000000000000000000000000000000"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"signed_header_2":{"message":{"slot":"0","proposer_index":"0","parent_root":"0x0000000000000000000000000000000000000000000000000000000000000000","state_root":"0x0000000000000000000000000000000000000000000000000000000000000000","body_root":"0x0000000000000000000000000000000000000000000000000000000000000000"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}}
-
-`
 
 const stateResult = `:
 
