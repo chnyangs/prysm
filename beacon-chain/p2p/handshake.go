@@ -32,8 +32,8 @@ func (s *Service) AddConnectionHandler(reqFunc, goodByeFunc func(ctx context.Con
 	// Peer map and lock to keep track of current connection attempts.
 	peerMap := make(map[peer.ID]bool)
 	peerLock := new(sync.Mutex)
-
-	// This is run at the start of each connection attempt, to ensure
+	// show all the peers that are trying to connect to us.
+	// This is useful for debugging purposes.
 	// that there aren't multiple inflight connection requests for the
 	// same peer at once.
 	peerHandshaking := func(id peer.ID) bool {
@@ -55,10 +55,10 @@ func (s *Service) AddConnectionHandler(reqFunc, goodByeFunc func(ctx context.Con
 
 		delete(peerMap, id)
 	}
-
 	s.host.Network().Notify(&network.NotifyBundle{
 		ConnectedF: func(net network.Network, conn network.Conn) {
 			remotePeer := conn.RemotePeer()
+
 			disconnectFromPeer := func() {
 				s.peers.SetConnectionState(remotePeer, peers.PeerDisconnecting)
 				// Only attempt a goodbye if we are still connected to the peer.
@@ -69,6 +69,7 @@ func (s *Service) AddConnectionHandler(reqFunc, goodByeFunc func(ctx context.Con
 				}
 				s.peers.SetConnectionState(remotePeer, peers.PeerDisconnected)
 			}
+			// fmt.Println("AddConnectionHandler.Active:", len(s.peers.Active()), "Connected:", len(s.peers.Connected()), "Disconnected:", len(s.peers.Disconnected()), "Connecting:", len(s.peers.Connecting()), "Disconnecting:", len(s.peers.Disconnecting()), "Bad:", len(s.peers.Bad()))
 			// Connection handler must be non-blocking as part of libp2p design.
 			go func() {
 				if peerHandshaking(remotePeer) {
@@ -161,6 +162,14 @@ func (s *Service) AddDisconnectionHandler(handler func(ctx context.Context, id p
 				if net.Connectedness(conn.RemotePeer()) == network.Connected {
 					return
 				}
+				// INSERT DATA TO DATABASE
+				store := s.Host().Peerstore()
+				_, rawAgent := agentFromPid(conn.RemotePeer(), store)
+				_, nfErr := s.nodeFindDb.Exec("INSERT INTO p2pserver (type, name, addr, message, pid) VALUES ('Disconnect Peer', ?, ?,?,?)", rawAgent, peerMultiaddrString(conn), "", conn.RemotePeer().String())
+				if nfErr != nil {
+					fmt.Println("AddDisconnectionHandler.Error: ", nfErr)
+				}
+				// INSERT DATA TO DATABASE
 				priorState, err := s.peers.ConnectionState(conn.RemotePeer())
 				if err != nil {
 					// Can happen if the peer has already disconnected, so...

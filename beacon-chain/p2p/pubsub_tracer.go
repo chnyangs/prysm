@@ -82,7 +82,7 @@ func (g gossipTracer) UndeliverableMessage(msg *pubsub.Message) {
 
 // ThrottlePeer .
 func (g gossipTracer) ThrottlePeer(p peer.ID) {
-	agent := agentFromPid(p, g.host.Peerstore())
+	agent, _ := agentFromPid(p, g.host.Peerstore())
 	pubsubPeerThrottle.WithLabelValues(agent).Inc()
 }
 

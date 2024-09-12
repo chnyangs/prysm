@@ -51,6 +51,7 @@ require (
 	github.com/libp2p/go-mplex v0.7.0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/manifoldco/promptui v0.7.0
+	github.com/mattn/go-sqlite3 v1.14.23
 	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
 	github.com/minio/highwayhash v1.0.2
 	github.com/minio/sha256-simd v1.0.1

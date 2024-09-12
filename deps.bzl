@@ -4972,3 +4972,10 @@ def prysm_deps():
         build_file = "//third_party:blst/blst.BUILD",
         sha256 = "132124c074e59ead77e1828cc54b587a182ea67b781b72198e802af4696d78fe",
     )
+    go_repository(
+        name = "com_github_mattn_go_sqlite3",
+        importpath = "github.com/mattn/go-sqlite3",
+        sum = "h1:gbShiuAP1W5j9UOksQ06aiiqPMxYecovVGwmTxWtuw0=",
+        version = "v1.14.23",  
+
+    )

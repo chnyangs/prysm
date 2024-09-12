@@ -3,6 +3,7 @@ package p2p
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -110,7 +111,6 @@ func (s *Service) RefreshENR() {
 func (s *Service) listenForNewNodes() {
 	iterator := filterNodes(s.ctx, s.dv5Listener.RandomNodes(), s.filterPeer)
 	defer iterator.Close()
-
 	for {
 		// Exit if service's context is canceled.
 		if s.ctx.Err() != nil {
@@ -323,15 +323,24 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 	if node == nil {
 		return false
 	}
-
 	// Ignore nodes with no IP address stored.
 	if node.IP() == nil {
 		return false
 	}
-
 	peerData, multiAddrs, err := convertToAddrInfo(node)
 	if err != nil {
 		log.WithError(err).Debug("Could not convert to peer data")
+		// INSERT INTO DB HERE
+		data := map[string]interface{}{
+			"type":    "Ignore Node",
+			"name":    "unknown",
+			"addr":    multiAddrs[0].String(),
+			"message": "Could not convert to peer data",
+			"pid":     peerData.ID.String(),
+		}
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 
@@ -341,21 +350,68 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 
 	// Ignore bad nodes.
 	if s.peers.IsBad(peerData.ID) {
+		// INSERT INTO DB HERE
+		data := map[string]interface{}{
+			"type":    "Ignore Node", //  if the peer is to be ignored
+			"name":    "unknown",
+			"addr":    multiAddrs[0].String(),
+			"message": "Bad Peer", //  if the peer is to be considered bad (by *any* of the registered scorers). If the peer is unknown this will
+			"pid":     peerData.ID.String(),
+		}
+		// INSERT INTO DB HERE
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 
 	// Ignore nodes that are already active.
 	if s.peers.IsActive(peerData.ID) {
+		// INSERT INTO DB HERE
+		data := map[string]interface{}{
+			"type":    "Ignore Node", //  if the peer is to be ignored
+			"name":    "unknown",
+			"addr":    multiAddrs[0].String(),
+			"message": "Already Active", //  if the peer is already active
+			"pid":     peerData.ID.String(),
+		}
+		// INSERT INTO DB HERE
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 
 	// Ignore nodes that are already connected.
 	if s.host.Network().Connectedness(peerData.ID) == network.Connected {
+		// INSERT INTO DB HERE
+		data := map[string]interface{}{
+			"type":    "Ignore Node", //  if the peer is to be ignored
+			"name":    "unknown",
+			"addr":    multiAddrs[0].String(),
+			"message": "Already Connected", //  if the peer is already connected
+			"pid":     peerData.ID.String(),
+		}
+		// INSERT INTO DB HERE
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 
 	// Ignore nodes that are not ready to receive incoming connections.
 	if !s.peers.IsReadyToDial(peerData.ID) {
+		// INSERT INTO DB HERE
+		data := map[string]interface{}{
+			"type":    "Ignore Node", //  if the peer is to be ignored
+			"name":    "unknown",
+			"addr":    multiAddrs[0].String(),
+			"message": "Not Ready To Dial", //  if the peer is not ready to dial
+			"pid":     peerData.ID.String(),
+		}
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 
@@ -364,16 +420,36 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 	if s.genesisValidatorsRoot != nil {
 		if err := s.compareForkENR(nodeENR); err != nil {
 			log.WithError(err).Trace("Fork ENR mismatches between peer and local node")
+			// INSERT INTO DB HERE
+			data := map[string]interface{}{
+				"type":    "Ignore Node", //  if the peer is to be ignored
+				"name":    "unknown",
+				"addr":    multiAddrs[0].String(),
+				"message": "Fork ENR Mismatch between peer and local node", //  if the peer's fork digest does not match the local node's
+				"pid":     peerData.ID.String(),
+			}
+			if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+				fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+			}
 			return false
 		}
 	}
 
 	// If the peer has 2 multiaddrs, favor the QUIC address, which is in first position.
 	multiAddr := multiAddrs[0]
-
 	// Add peer to peer handler.
 	s.peers.Add(nodeENR, peerData.ID, multiAddr, network.DirUnknown)
 
+	data := map[string]interface{}{
+		"type":    "New Peer", //  if the peer is to be ignored
+		"name":    "unknown",
+		"addr":    multiAddr.String(),
+		"message": "Add Node As Peer", //  if the peer is not ready to dial
+		"pid":     peerData.ID.String(),
+	}
+	if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+		fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+	}
 	return true
 }
 

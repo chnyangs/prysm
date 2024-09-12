@@ -6,6 +6,9 @@ package p2p
 import (
 	"context"
 	"crypto/ecdsa"
+	"database/sql"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v5/async"
@@ -52,6 +56,10 @@ const maxBadResponses = 5
 // maxDialTimeout is the timeout for a single peer dial.
 var maxDialTimeout = params.BeaconConfig().RespTimeoutDuration()
 
+var tbMetrics = "metrics"
+var tbP2PServer = "p2pserver"
+var tbPeerActivity = "peeractivity"
+
 // Service for managing peer to peer (p2p) networking.
 type Service struct {
 	started               bool
@@ -78,6 +86,8 @@ type Service struct {
 	genesisTime           time.Time
 	genesisValidatorsRoot []byte
 	activeValidatorCount  uint64
+	nodeFindDb            *sql.DB
+	dbLock                sync.Mutex
 }
 
 // NewService initializes a new p2p service compatible with shared.Service interface. No
@@ -164,11 +174,167 @@ func NewService(ctx context.Context, cfg *Config) (*Service, error) {
 			},
 		},
 	})
-
 	// Initialize Data maps.
 	types.InitializeDataMaps()
 
 	return s, nil
+}
+
+func initFindNodeDB(dbPath string) (*sql.DB, error) {
+	// open the db
+	nodeFinddb, nfErr := sql.Open("sqlite3", dbPath)
+	if nfErr != nil {
+		return nil, nfErr
+	}
+	nodeFinddb.SetMaxOpenConns(100)
+	nodeFinddb.SetMaxIdleConns(50)
+	// Enable WAL mode
+	_, nfErr = nodeFinddb.Exec("PRAGMA journal_mode=WAL;")
+	if nfErr != nil {
+		return nil, nfErr
+	}
+	// Enable WAL mode
+	_, nfErr = nodeFinddb.Exec("PRAGMA journal_mode=WAL;")
+	if nfErr != nil {
+		fmt.Println(nfErr)
+		return nil, nfErr
+	}
+	// (type, name, addr, message, pid)
+	createTableQueryP2PServer := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			type TEXT,
+			name TEXT,
+			addr TEXT,
+			message TEXT,
+			pid TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);`, tbP2PServer)
+	// Create the table if it doesn't exist
+	_, nfErr = nodeFinddb.Exec(createTableQueryP2PServer)
+	if nfErr != nil {
+		fmt.Println("createTableQuery", nfErr)
+		return nil, nfErr
+	}
+	createTableQueryMetrics := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			agent TEXT,
+			score FLOAT,
+			pid TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`, tbMetrics)
+	// Create the table if it doesn't exist
+	_, nfErr = nodeFinddb.Exec(createTableQueryMetrics)
+	if nfErr != nil {
+		fmt.Println("createTableQuery", nfErr)
+		return nil, nfErr
+	}
+	createTableQueryPeerActivity := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			active INTEGER,
+			connected INTEGER,
+			disconnected INTEGER,
+			connecting INTEGER,
+			disconnecting INTEGER,
+			bad INTEGER,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`, tbPeerActivity)
+	// Create the table if it doesn't exist
+	_, nfErr = nodeFinddb.Exec(createTableQueryPeerActivity)
+	if nfErr != nil {
+		fmt.Println("createTableQuery", nfErr)
+		return nil, nfErr
+	}
+
+	// Create the index if it doesn't exist
+	createUniqueIndexQuery := fmt.Sprintf(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_metrics ON %s (agent, score, pid);
+	`, tbMetrics)
+	_, nfErr = nodeFinddb.Exec(createUniqueIndexQuery)
+	if nfErr != nil {
+		fmt.Println("createUniqueIndexQuery", nfErr)
+		return nil, nfErr
+	}
+	// Create the trigger to automatically set created_at if not provided
+	createTriggerQueryP2PServer := fmt.Sprintf(`
+		CREATE TRIGGER IF NOT EXISTS set_created_at
+		BEFORE INSERT ON %s
+		FOR EACH ROW
+		WHEN NEW.created_at IS NULL
+		BEGIN
+			SELECT NEW.created_at = CURRENT_TIMESTAMP;
+		END;
+	`, tbP2PServer)
+	_, nfErr = nodeFinddb.Exec(createTriggerQueryP2PServer)
+	if nfErr != nil {
+		fmt.Println("createTriggerQueryP2PServer", nfErr)
+		return nil, nfErr
+	}
+	createTriggerQueryMetrics := fmt.Sprintf(`
+		CREATE TRIGGER IF NOT EXISTS set_created_at
+		BEFORE INSERT ON %s
+		FOR EACH ROW
+		WHEN NEW.created_at IS NULL
+		BEGIN
+			SELECT NEW.created_at = CURRENT_TIMESTAMP;
+		END;
+	`, tbMetrics)
+	_, nfErr = nodeFinddb.Exec(createTriggerQueryMetrics)
+	if nfErr != nil {
+		fmt.Println("createTriggerQueryMetrics", nfErr)
+		return nil, nfErr
+	}
+	// create the trigger to automatically set created_at if not provided
+	createTriggerQueryPeerActivity := fmt.Sprintf(`
+		CREATE TRIGGER IF NOT EXISTS set_created_at
+		BEFORE INSERT ON %s
+		FOR EACH ROW
+		WHEN NEW.created_at IS NULL
+		BEGIN
+			SELECT NEW.created_at = CURRENT_TIMESTAMP;
+		END;
+	`, tbPeerActivity)
+	_, nfErr = nodeFinddb.Exec(createTriggerQueryPeerActivity)
+	if nfErr != nil {
+		fmt.Println("createTriggerQueryPeerActivity", nfErr)
+		return nil, nfErr
+	}
+	return nodeFinddb, nil
+}
+
+func (s *Service) insertLogDynamic(tableName string, data map[string]interface{}) error {
+	// Lock the database for safe concurrent access
+	s.dbLock.Lock()
+	defer s.dbLock.Unlock()
+
+	// Prepare the slices to hold the columns and placeholders for the query
+	var columns []string
+	var placeholders []string
+	var values []interface{}
+
+	// Loop through the map to dynamically build the query
+	for column, value := range data {
+		columns = append(columns, column)        // Add the column name
+		placeholders = append(placeholders, "?") // Add a placeholder for each value
+		values = append(values, value)           // Add the actual value for the placeholder
+	}
+
+	// Join the column names and placeholders for the query string
+	query := fmt.Sprintf("INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
+		tableName,
+		strings.Join(columns, ", "),      // Join column names with commas
+		strings.Join(placeholders, ", ")) // Join placeholders with commas
+
+	// Execute the query with the dynamically created values
+	_, err := s.nodeFindDb.Exec(query, values...)
+	if err != nil {
+		return fmt.Errorf("failed to insert log: %v", err)
+	}
+	return nil
 }
 
 // Start the p2p service.
@@ -252,11 +418,11 @@ func (s *Service) Start() {
 			fields["inboundQUIC"] = inboundQUICCount
 			fields["outboundQUIC"] = outboundQUICCount
 		}
-
 		log.WithFields(fields).Info("Connected peers")
 	})
 
 	multiAddrs := s.host.Network().ListenAddresses()
+
 	logIPAddr(s.host.ID(), multiAddrs...)
 
 	p2pHostAddress := s.cfg.HostAddress
@@ -278,6 +444,12 @@ func (s *Service) Start() {
 // Stop the p2p service and terminate all peer connections.
 func (s *Service) Stop() error {
 	defer s.cancel()
+	defer func() {
+		if err := s.nodeFindDb.Close(); err != nil {
+			// Handle the error, log it or return it
+			log.WithError(err).Error("Failed to close the database")
+		}
+	}()
 	s.started = false
 	if s.dv5Listener != nil {
 		s.dv5Listener.Close()
@@ -419,6 +591,13 @@ func (s *Service) awaitStateInitialized() {
 	if err != nil {
 		log.WithError(err).Error("Could not initialize fork digest")
 	}
+	dbPath := "/Users/xyan0559/.sqlite/consensus_prysm.db"
+	nodeFinddb, nfErr := initFindNodeDB(dbPath)
+	if nfErr != nil {
+		fmt.Println("initFindNodeDB", nfErr)
+		return
+	}
+	s.nodeFindDb = nodeFinddb
 }
 
 func (s *Service) connectWithAllTrustedPeers(multiAddrs []multiaddr.Multiaddr) {

@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -170,7 +171,19 @@ func (s *Service) updateMetrics() {
 	p2pPeerCount.WithLabelValues("Connecting").Set(float64(len(s.peers.Connecting())))
 	p2pPeerCount.WithLabelValues("Disconnecting").Set(float64(len(s.peers.Disconnecting())))
 	p2pPeerCount.WithLabelValues("Bad").Set(float64(len(s.peers.Bad())))
-
+	// INSERT INTO DB HERE
+	activityData := map[string]interface{}{
+		"active":        len(s.peers.Active()),
+		"connected":     len(s.peers.Connected()),
+		"disconnected":  len(s.peers.Disconnected()),
+		"connecting":    len(s.peers.Connecting()),
+		"disconnecting": len(s.peers.Disconnecting()),
+		"bad":           len(s.peers.Bad()),
+	}
+	// INSERT INTO DB HERE
+	if nfErr := s.insertLogDynamic(tbPeerActivity, activityData); nfErr != nil {
+		fmt.Printf("Failed to insert %s to activityData. Connection Failed: %s", tbPeerActivity, nfErr)
+	}
 	store := s.Host().Peerstore()
 	numConnectedPeersByClient := make(map[string]float64)
 	peerScoresByClient := make(map[string][]float64)
@@ -182,11 +195,21 @@ func (s *Service) updateMetrics() {
 			continue
 		}
 
-		foundName := agentFromPid(pid, store)
+		foundName, rawAgent := agentFromPid(pid, store)
+
 		numConnectedPeersByClient[foundName] += 1
 
 		// Get peer scoring data.
 		overallScore := s.peers.Scorers().Score(pid)
+		// INSERT INTO DB HERE
+		peerData := map[string]interface{}{
+			"agent": rawAgent,
+			"score": overallScore,
+			"pid":   pid.String(),
+		}
+		if nfErr := s.insertLogDynamic(tbMetrics, peerData); nfErr != nil {
+			fmt.Printf("Failed to insert %s to peerData. Connection Failed: %s", tbMetrics, nfErr)
+		}
 		peerScoresByClient[foundName] = append(peerScoresByClient[foundName], overallScore)
 	}
 	for agent, total := range numConnectedPeersByClient {
@@ -209,12 +232,14 @@ func average(xs []float64) float64 {
 	return total / float64(len(xs))
 }
 
-func agentFromPid(pid peer.ID, store peerstore.Peerstore) string {
+func agentFromPid(pid peer.ID, store peerstore.Peerstore) (string, interface{}) {
 	// Get the agent data.
 	rawAgent, err := store.Get(pid, "AgentVersion")
+	// the type of rawAgent is interface{}, add to return value
+
 	agent, ok := rawAgent.(string)
 	if err != nil || !ok {
-		return "unknown"
+		return "unknown", rawAgent
 	}
 	foundName := "unknown"
 	for _, knownAgent := range knownAgentVersions {
@@ -224,5 +249,5 @@ func agentFromPid(pid peer.ID, store peerstore.Peerstore) string {
 			foundName = knownAgent
 		}
 	}
-	return foundName
+	return foundName, rawAgent
 }
