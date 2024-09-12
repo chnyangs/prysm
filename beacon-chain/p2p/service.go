@@ -36,6 +36,7 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/runtime"
 	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"go.opencensus.io/trace"
 )
 
@@ -591,7 +592,16 @@ func (s *Service) awaitStateInitialized() {
 	if err != nil {
 		log.WithError(err).Error("Could not initialize fork digest")
 	}
-	dbPath := "/Users/xyan0559/.sqlite/consensus_prysm.db"
+	// Load the db path from the .env file
+	viper.SetConfigName("dbconfig") // The name of the config file without extension
+	viper.SetConfigType("yaml")     // The file type
+	viper.AddConfigPath("../")      // Path to look for the config file, relative to Folder B/C
+
+	// Read the configuration file
+	if err := viper.ReadInConfig(); err != nil {
+		return
+	}
+	dbPath := viper.GetString("database.CONSENSUS_DB_PATH")
 	nodeFinddb, nfErr := initFindNodeDB(dbPath)
 	if nfErr != nil {
 		fmt.Println("initFindNodeDB", nfErr)
