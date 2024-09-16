@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -321,20 +322,48 @@ func (s *Service) startDiscoveryV5(
 func (s *Service) filterPeer(node *enode.Node) bool {
 	// Ignore nil node entries passed in.
 	if node == nil {
+		data := map[string]interface{}{
+			"type":    "Ignore Node",
+			"name":    "unknown",
+			"addr":    "unknown",
+			"message": "Nil Node Entry",
+			"pid":     "unknown",
+		}
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 	// Ignore nodes with no IP address stored.
 	if node.IP() == nil {
+		data := map[string]interface{}{
+			"type":    "Ignore Node",
+			"name":    "unknown",
+			"addr":    "unknown",
+			"message": "No IP Address",
+			"pid":     node.ID().String(),
+		}
+		if nfErr := s.insertLogDynamic(tbP2PServer, data); nfErr != nil {
+			fmt.Printf("Failed to insert %s Connection Failed: %s", tbP2PServer, nfErr)
+		}
 		return false
 	}
 	peerData, multiAddrs, err := convertToAddrInfo(node)
+	if peerData == nil || len(multiAddrs) == 0 {
+		return false
+	}
+	addrStrings := make([]string, len(multiAddrs))
+	for i, addr := range multiAddrs {
+		addrStrings[i] = addr.String()
+	}
+	joinedAddrs := strings.Join(addrStrings, "|")
 	if err != nil {
 		log.WithError(err).Debug("Could not convert to peer data")
 		// INSERT INTO DB HERE
 		data := map[string]interface{}{
 			"type":    "Ignore Node",
 			"name":    "unknown",
-			"addr":    multiAddrs[0].String(),
+			"addr":    joinedAddrs,
 			"message": "Could not convert to peer data",
 			"pid":     peerData.ID.String(),
 		}
@@ -344,17 +373,13 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 		return false
 	}
 
-	if peerData == nil || len(multiAddrs) == 0 {
-		return false
-	}
-
 	// Ignore bad nodes.
 	if s.peers.IsBad(peerData.ID) {
 		// INSERT INTO DB HERE
 		data := map[string]interface{}{
 			"type":    "Ignore Node", //  if the peer is to be ignored
 			"name":    "unknown",
-			"addr":    multiAddrs[0].String(),
+			"addr":    joinedAddrs,
 			"message": "Bad Peer", //  if the peer is to be considered bad (by *any* of the registered scorers). If the peer is unknown this will
 			"pid":     peerData.ID.String(),
 		}
@@ -371,7 +396,7 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 		data := map[string]interface{}{
 			"type":    "Ignore Node", //  if the peer is to be ignored
 			"name":    "unknown",
-			"addr":    multiAddrs[0].String(),
+			"addr":    joinedAddrs,
 			"message": "Already Active", //  if the peer is already active
 			"pid":     peerData.ID.String(),
 		}
@@ -388,7 +413,7 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 		data := map[string]interface{}{
 			"type":    "Ignore Node", //  if the peer is to be ignored
 			"name":    "unknown",
-			"addr":    multiAddrs[0].String(),
+			"addr":    joinedAddrs,
 			"message": "Already Connected", //  if the peer is already connected
 			"pid":     peerData.ID.String(),
 		}
@@ -405,7 +430,7 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 		data := map[string]interface{}{
 			"type":    "Ignore Node", //  if the peer is to be ignored
 			"name":    "unknown",
-			"addr":    multiAddrs[0].String(),
+			"addr":    joinedAddrs,
 			"message": "Not Ready To Dial", //  if the peer is not ready to dial
 			"pid":     peerData.ID.String(),
 		}
@@ -424,7 +449,7 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 			data := map[string]interface{}{
 				"type":    "Ignore Node", //  if the peer is to be ignored
 				"name":    "unknown",
-				"addr":    multiAddrs[0].String(),
+				"addr":    joinedAddrs,
 				"message": "Fork ENR Mismatch between peer and local node", //  if the peer's fork digest does not match the local node's
 				"pid":     peerData.ID.String(),
 			}
@@ -443,7 +468,7 @@ func (s *Service) filterPeer(node *enode.Node) bool {
 	data := map[string]interface{}{
 		"type":    "New Peer", //  if the peer is to be ignored
 		"name":    "unknown",
-		"addr":    multiAddr.String(),
+		"addr":    joinedAddrs,
 		"message": "Add Node As Peer", //  if the peer is not ready to dial
 		"pid":     peerData.ID.String(),
 	}
